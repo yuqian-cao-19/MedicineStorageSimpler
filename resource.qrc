@@ -1,0 +1,11 @@
+<RCC>
+    <qresource prefix="/">
+        <file>images/home.png</file>
+        <file>images/input.jpeg</file>
+        <file>images/inventory.png</file>
+        <file>images/monitorIn.png</file>
+        <file>images/monitorOut.jpeg</file>
+        <file>images/output.jpeg</file>
+        <file>images/record.png</file>
+    </qresource>
+</RCC>
