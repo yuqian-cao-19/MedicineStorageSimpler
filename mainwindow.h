@@ -4,6 +4,7 @@
 #include "mysqlite.h"
 #include "autofillSku.h"
 #include "setnoedit.h"
+#include "adjustinvinput.h"
 
 #include <QMainWindow>
 #include <QToolBar>
@@ -28,6 +29,9 @@
 #include <QFont>
 #include <QStandardItemModel>
 #include <QListView>
+#include <QCheckBox>
+#include <QShortcut>
+
 
 class MainWindow : public QMainWindow
 {
@@ -79,23 +83,44 @@ private:
     QTableView *ioTableView;
     QTableView *invTableView;
     QTableView *receiptTableView;
+    QTableView *invInputAdjustView;
+    QTableView *invOutputAdjustView;
+    bool inputAdjShown;
+    bool outputAdjShown;
 
-    QLineEdit *nameCNEditInv;
-    QLineEdit *nameENEditInv;
-    QLineEdit *aliasCNEditInv;
-    QLineEdit *aliasENEditInv;
+    QLineEdit *nameEditInv;
     QComboBox *doseEditInv;
     QComboBox *presEditInv;
-    QComboBox *specUnitEditInv;
-    QLineEdit *specQuantEditInv;
+    //QComboBox *specUnitEditInv;
+    //QLineEdit *specQuantEditInv;
     QComboBox *packageEditInv;
-    QLineEdit *manufCNEditInv;
-    QLineEdit *manufENEditInv;
-    QLineEdit *originEditInv;
-    QLineEdit *quantityEditInv;
-    QLineEdit *priceEditInv;
+    QComboBox *manufEditInv;
+    //QLineEdit *originEditInv;
+    QLineEdit *quantityEditInvLow;
+    QLineEdit *quantityEditInvHigh;
+    QLineEdit *priceEditInvLow;
+    QLineEdit *priceEditInvHigh;
+    QCheckBox *nameCheckBox;
+    QCheckBox *doseCheckBox;
+    QCheckBox *presCheckBox;
+    QCheckBox *packageCheckBox;
+    QCheckBox *manufCheckBox;
+    QCheckBox *quantityCheckBox;
+    QCheckBox *priceCheckBox;
+    QLabel *invInputLabel;
+    QLabel *invOutputLabel;
+    QPushButton *invInputAddButton;
+    QPushButton *invOutputAddButton;
+    QPushButton *invInputDeleteButton;
+    QPushButton *invOutputDeleteButton;
+    QPushButton *invInputSubmitButton;
+    QPushButton *invOutputSubmitButton;
+    QPushButton *invInputDeleteAllButton;
+    QPushButton *invOutputDeleteAllButton;
 
-    QLineEdit *nameCNEditReceipt;
+    adjustInvInput *invInputDialog;
+
+    /*QLineEdit *nameCNEditReceipt;
     QLineEdit *nameENEditReceipt;
     QLineEdit *aliasCNEditReceipt;
     QLineEdit *aliasENEditReceipt;
@@ -108,7 +133,8 @@ private:
     QLineEdit *manufENEditReceipt;
     QLineEdit *originEditReceipt;
     QLineEdit *quantityEditReceipt;
-    QLineEdit *priceEditReceipt;
+    QLineEdit *priceEditReceipt;*/
+    QLineEdit *nameEditReceipt;
     QComboBox *dateSelection;
     QComboBox *typeSelection;
 
@@ -127,6 +153,7 @@ private:
     void createStackWidget();
     void switchPages();
     void checkDB();
+    QWidget *createHomePage();
     QWidget *createIOPage();
 
     void insertStockData();
@@ -142,10 +169,27 @@ private:
     void fillLines();
     void tmpFunc();
     void initializeModel();
+
     QWidget* createInventoryPage();
     void createTmpInventoryTable();
     void clearInvFields();
     void searchInvData();
+    void showInvInput();
+    void showInvOutput();
+    void addInvInput();
+    void addInvOutput();
+    void insertInvAdjustData();
+    void hideInvAdjustWindow();
+    void hideInvInput();
+    void hideInvOutput();
+    void adjustIOFilter();
+    void submitInvInputData();
+    void submitInvOutputData();
+    void deleteInvInputData();
+    void deleteInvOutputData();
+    void deleteAllInvInputData();
+    void deleteAllInvOutputData();
+
     QWidget* createReceiptPage();//Receipt page
     void createTmpReceiptTable();
     void searchReceiptData();
@@ -154,5 +198,6 @@ private:
     void calcTotalReceiptPage();
     void clearReceiptData();
     void resetReceiptView();
+
 };
 #endif // MAINWINDOW_H
