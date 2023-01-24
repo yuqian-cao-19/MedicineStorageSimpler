@@ -27,6 +27,8 @@ MainWindow::MainWindow(QWidget *parent)
         qDebug() << "Connection unsuccessful";
     currPage = HOME;
 
+    inputAdjShown = false;
+    outputAdjShown = false;
     initializeModel();
     calcTotalReceiptPage();
     currReceiptPage = 1;
@@ -184,14 +186,14 @@ void MainWindow::createNaviBar(){
 
 void MainWindow::createStackWidget(){
     stackWidget = new QStackedWidget;
-    QLabel *label1 = new QLabel("1");
+    QWidget *homePage = createHomePage();
     QWidget *inventoryPage = createInventoryPage();
     QWidget *inputPage = createIOPage();
     QLabel *label4 = new QLabel("4");
     QLabel *label5 = new QLabel("5");
     QLabel *label6 = new QLabel("6");
     QWidget *receiptPage = createReceiptPage();
-    stackWidget->addWidget(label1);
+    stackWidget->addWidget(homePage);
     stackWidget->addWidget(inventoryPage);
     stackWidget->addWidget(inputPage);
     stackWidget->addWidget(label4);
@@ -214,27 +216,32 @@ void MainWindow::switchPages(){
         titleText->setText(currPage);
         createTmpInventoryTable();
         inventoryModel->select();
+        ioModel->setFilter("");
         stackWidget->setCurrentIndex(1);
     }
     else if(action->text() == INPUT){
         currPage = INPUT;
         titleText->setText(currPage);
         stackWidget->setCurrentIndex(2);
+        filterSetting();
     }
     else if(action->text() == OUTPUT){
         currPage = OUTPUT;
         titleText->setText(currPage);
         stackWidget->setCurrentIndex(2);
+        filterSetting();
     }
     else if(action->text() == MONINPUT){
         currPage = MONINPUT;
         titleText->setText(currPage);
         stackWidget->setCurrentIndex(2);
+        filterSetting();
     }
     else if(action->text() == MONOUTPUT){
         currPage = MONOUTPUT;
         titleText->setText(currPage);
         stackWidget->setCurrentIndex(2);
+        filterSetting();
     }
     else if(action->text() == RECEIPT){
         currPage = RECEIPT;
@@ -243,7 +250,7 @@ void MainWindow::switchPages(){
         currReceiptPageDisplay->setText(QString("%1 | %2").arg(currReceiptPage).arg(totalReceiptPage));
         stackWidget->setCurrentIndex(6);
     }
-    filterSetting();
+
 }
 
 void MainWindow::checkDB(){
@@ -266,6 +273,23 @@ void MainWindow::checkDB(){
         else
             qDebug() << "Connection successful";
     }
+}
+
+QWidget *MainWindow::createHomePage(){
+    QWidget *homePage = new QWidget;
+
+    QLabel *homeText_1 = new QLabel("My Medicine\nStorage\nSystem");
+    homeText_1->setFont(QFont("Times", 30, QFont::Bold));
+
+    /*QLabel *imageLabel = new QLabel();
+    QPixmap pic(":/images/storage.jpeg");
+    imageLabel->setPixmap(pic);
+*/
+    QVBoxLayout *layout = new QVBoxLayout;
+    layout->addWidget(homeText_1, 0, Qt::AlignHCenter);
+    homePage->setLayout(layout);
+
+    return homePage;
 }
 
 QWidget *MainWindow::createIOPage(){
@@ -323,7 +347,7 @@ QWidget *MainWindow::createIOPage(){
     QLabel *priceLabel = new QLabel("Price");
     priceEdit = new QLineEdit;
 
-    QGridLayout *gridLayout = new QGridLayout();
+    QGridLayout *gridLayout = new QGridLayout;
     gridLayout->addWidget(nameCNLabel, 0, 0);
     gridLayout->addWidget(nameCNEdit, 0, 1);
     gridLayout->addWidget(nameENLabel, 1, 0);
@@ -524,12 +548,11 @@ void MainWindow::checkIOFields(){
 //user types in either nameCNEdit, nameENEdit, aliasCNEdit, aliasENEdit
 //check if corresponding data exists in SKU table
 void MainWindow::skuExist(){
-    qDebug() << "skuExist...";
-    qDebug() << "exist?: " << exist;
+    qDebug() << "sku exist?: " << exist;
     QSqlQuery *query = new QSqlQuery(mysql->myDB);
     int count = 0;
     if(!nameCNEdit->text().isEmpty()){
-        QString tmpStr = QString("select count(*) from SKU where name_cn = '%1'").arg(nameCNEdit->text());
+        QString tmpStr = QString("select count(*) from SKU where name_cn = '%1' or name_en = '%1' or alias_cn = '%1' or alias_en = '%1'").arg(nameCNEdit->text());
         if(!query->exec(tmpStr)){
             qDebug() << "query execute selection from SKU failed" << query->lastError().text();
         }
@@ -576,7 +599,6 @@ void MainWindow::skuExist(){
         }
     }
     delete query;
-    qDebug() << "skuExist exiting...";
 }
 
 //called if matching field(s) exist
@@ -587,8 +609,12 @@ void MainWindow::createTmpSkuView(){
     //filter out sku table
     QString filterStr = "";
 
-    if(!nameCNEdit->text().isEmpty())
+    if(!nameCNEdit->text().isEmpty()){
         filterStr.append(QString("name_cn like '\%%1\%'").arg(nameCNEdit->text()));
+        filterStr.append(QString(" or name_en like '\%%1\%'").arg(nameCNEdit->text()));
+        filterStr.append(QString(" or alias_cn like '\%%1\%'").arg(nameCNEdit->text()));
+        filterStr.append(QString(" or alias_en like '\%%1\%'").arg(nameCNEdit->text()));
+    }
     if(!nameENEdit->text().isEmpty()){
         if(!filterStr.isEmpty())
             filterStr.append(" and ");
@@ -697,6 +723,32 @@ void MainWindow::insertStockData(){
         skuId = skuModel->record(0).value(0).toInt();
     }
 
+    //check inventory
+    if(currPage == OUTPUT || currPage == MONOUTPUT){
+        QString queryInvStr = QString("select quantity from inventory where sku_id = %1").arg(skuId);
+        if(!query->exec(queryInvStr)){
+            qDebug() << "query inventory failed: " << query->lastError().text();
+        }
+        if(query->next()){
+            int invQuant = query->value(0).toInt();
+            QString warningStr = QString("Current Inventory Count: %1\n"
+                                         "Attempt to Remove Count: %2\n"
+                                         "Would you like to remove %1 instead?"
+                                         ).arg(invQuant).arg(quantity);
+            //results in negative storage, generate warning box
+            if(invQuant < quantity){
+                int ok = QMessageBox::warning(this, "Negative Inventory Warning", warningStr, QMessageBox::No, QMessageBox::Yes);
+                if(ok == QMessageBox::No)
+                    return;
+                else{
+                    quantity = invQuant;
+                }
+            }
+        }
+        else{
+            qDebug() << "query inventory next failed: " << query->lastError().text();
+        }
+    }
 
     QSqlRecord io_record = ioModel->record();
     io_record.setValue(0, skuId);
@@ -865,8 +917,8 @@ void MainWindow::submitData(){
 
     QString receipt_date = currDate.toString("yyyy_MM_dd");
 
-    //QString data_str = QString("insert into receipt (io_type, receipt_date) values('%1', '%2')").arg(currPage).arg(receipt_date);
-    QString data_str = QString("insert into receipt (io_type, receipt_date) values('%1', '%2')").arg(currPage).arg(tmpTimeStr);
+    QString data_str = QString("insert into receipt (io_type, receipt_date) values('%1', '%2')").arg(currPage).arg(receipt_date);
+    //QString data_str = QString("insert into receipt (io_type, receipt_date) values('%1', '%2')").arg(currPage).arg(tmpTimeStr);
     qDebug() << "receipt: " << data_str;
     //qDebug() << "receipt ID: " << receiptId;
     query->exec(data_str);
@@ -897,8 +949,8 @@ void MainWindow::submitData(){
     if(dateSelection->itemText(dateSelection->count()-1) != tmpTimeStr)
         dateSelection->addItem(tmpTimeStr);
     createTmpReceiptTable();
+    inventoryModel->select();
     deleteAllInputData();
-
 }
 //----------------------------------------------------------------------------------
 
@@ -910,24 +962,19 @@ QWidget* MainWindow::createInventoryPage(){
     titleLayout->addWidget(inventoryTitle, 0, Qt::AlignHCenter);
 
 
-    QLabel *nameCNLabel = new QLabel("Name (CN)");
-    nameCNEditInv = new QLineEdit;
-    QLabel *nameENLabel = new QLabel("Name (EN)");
-    nameENEditInv = new QLineEdit;
-    QLabel *aliasCNLabel = new QLabel("Alias (CN)");
-    aliasCNEditInv = new QLineEdit;
-    QLabel *aliasENLabel = new QLabel("Alias (EN)");
-    aliasENEditInv = new QLineEdit;
+    QLabel *nameLabel = new QLabel("Name");
+    nameEditInv = new QLineEdit;
     QLabel *doseLabel = new QLabel("Dose Type");
     doseEditInv = new QComboBox;
     QStringList doseList;
-    doseList << "" << "Granule" << "Capsule" << "Tablet" << "Taw" << "Other";
+    doseList << "Granule" << "Capsule" << "Tablet" << "Raw" << "Other";
     doseEditInv->addItems(doseList);
-    QLabel *presLabel = new QLabel("Formula*");
+    QLabel *presLabel = new QLabel("Formula");
     presEditInv = new QComboBox;
     QStringList presList;
-    presList << "" << "Single Herb" << "Formula";
+    presList << "Single Herb" << "Formula";
     presEditInv->addItems(presList);
+/*
     QLabel *specUnitLabel = new QLabel("Spec Unit*");
     specUnitEditInv = new QComboBox;
     QStringList specUnitList;
@@ -935,27 +982,82 @@ QWidget* MainWindow::createInventoryPage(){
     specUnitEditInv->addItems(specUnitList);
     QLabel *specQuantLabel = new QLabel("Spec Quantity*");
     specQuantEditInv = new QLineEdit;
-    QLabel *packageLabel = new QLabel("Package*");
+*/
+    QLabel *packageLabel = new QLabel("Package");
     packageEditInv = new QComboBox;
     QStringList packageList;
-    packageList << "" << "Bottle" << "Box" << "Bag";
+    packageList << "Bottle" << "Box" << "Bag";
     packageEditInv->addItems(packageList);
-    QLabel *manufCNLabel = new QLabel("Manufacturer (CN)*");
-    manufCNEditInv = new QLineEdit;
-    QLabel *manufENLabel = new QLabel("Manufacturer (EN)*");
-    manufENEditInv = new QLineEdit;
-    QLabel *originLabel = new QLabel("Product of Origin");
+    QLabel *manufLabel = new QLabel("Manufacturer");
+    manufEditInv = new QComboBox;
+    QStringList manufList;
+    QSqlQuery* query = new QSqlQuery(mysql->myDB);
+    QString queryStr = QString("select distinct manufacturer_cn from SKU");
+    if(!query->exec(queryStr)){
+        qDebug() << "cannot select distinct manufacturer from inventory: " << query->lastError().text();
+    }
+    while(query->next()){
+        QString tmpStr = query->value(0).toString();
+        if(!tmpStr.isEmpty())
+            manufList << query->value(0).toString();
+    }
+    manufEditInv->addItems(manufList);
+ /*   QLabel *originLabel = new QLabel("Product of Origin");
     originEditInv = new QLineEdit;
-    QLabel *quantityLabel = new QLabel("Quantity*");
-    quantityEditInv = new QLineEdit;
+ */
+    QLabel *quantityLabel = new QLabel("Quantity");
+    quantityEditInvLow = new QLineEdit;
+    quantityEditInvHigh = new QLineEdit;
+    QLabel *toLabel = new QLabel("to");
+    QLabel *toLabel2 = new QLabel("to");
     QLabel *priceLabel = new QLabel("Price");
-    priceEditInv = new QLineEdit;
+    priceEditInvLow = new QLineEdit;
+    priceEditInvHigh = new QLineEdit;
+    nameCheckBox = new QCheckBox(this);
+    doseCheckBox = new QCheckBox(this);
+    presCheckBox = new QCheckBox(this);
+    packageCheckBox = new QCheckBox(this);
+    manufCheckBox = new QCheckBox(this);
+    quantityCheckBox = new QCheckBox(this);
+    priceCheckBox = new QCheckBox(this);
+    QLabel *nullLabel = new QLabel("");
 
     QPushButton *queryButton = new QPushButton("Search");
     QPushButton *clearButton = new QPushButton("Clear");
 
     QGridLayout *gridLayout = new QGridLayout();
-    gridLayout->addWidget(nameCNLabel, 0, 0);
+    gridLayout->addWidget(nameCheckBox, 0, 0);
+    gridLayout->addWidget(nameLabel, 0, 1);
+    gridLayout->addWidget(nameEditInv, 0, 2);
+    gridLayout->addWidget(doseCheckBox, 1, 0);
+    gridLayout->addWidget(doseLabel, 1, 1);
+    gridLayout->addWidget(doseEditInv, 1, 2);
+    gridLayout->addWidget(presCheckBox, 2, 0);
+    gridLayout->addWidget(presLabel, 2, 1);
+    gridLayout->addWidget(presEditInv, 2, 2);
+    gridLayout->addWidget(packageCheckBox, 3, 0);
+    gridLayout->addWidget(packageLabel, 3, 1);
+    gridLayout->addWidget(packageEditInv, 3, 2);
+    gridLayout->addWidget(manufCheckBox, 4, 0);
+    gridLayout->addWidget(manufLabel, 4, 1);
+    gridLayout->addWidget(manufEditInv, 4, 2);
+
+    gridLayout->addWidget(nullLabel, 0, 3);
+
+    gridLayout->addWidget(quantityCheckBox, 0, 4);
+    gridLayout->addWidget(quantityLabel, 0, 5);
+    gridLayout->addWidget(quantityEditInvLow, 0, 6);
+    gridLayout->addWidget(toLabel, 0, 7);
+    gridLayout->addWidget(quantityEditInvHigh, 0, 8);
+    gridLayout->addWidget(priceCheckBox, 1, 4);
+    gridLayout->addWidget(priceLabel, 1, 5);
+    gridLayout->addWidget(priceEditInvLow, 1, 6);
+    gridLayout->addWidget(toLabel2, 1, 7);
+    gridLayout->addWidget(priceEditInvHigh, 1, 8);
+
+    gridLayout->addWidget(clearButton, 4, 10);
+    gridLayout->addWidget(queryButton, 4, 9);
+    /*gridLayout->addWidget(nameCNLabel, 0, 0);
     gridLayout->addWidget(nameCNEditInv, 0, 1);
     gridLayout->addWidget(nameENLabel, 1, 0);
     gridLayout->addWidget(nameENEditInv, 1, 1);
@@ -987,13 +1089,96 @@ QWidget* MainWindow::createInventoryPage(){
     gridLayout->addWidget(priceLabel, 1, 6);
     gridLayout->addWidget(priceEditInv, 1, 7);
     gridLayout->addWidget(queryButton, 2, 7);
-    gridLayout->addWidget(clearButton, 3, 7);
+    gridLayout->addWidget(clearButton, 3, 7);*/
+
+    //QLabel *adjustLabel = new QLabel("Adjust Inventory: ");
+    QPushButton *invInputButton = new QPushButton("Monitor Input");
+    QPushButton *invOutputButton = new QPushButton("Monitor Output");
+    QHBoxLayout *hLayout = new QHBoxLayout();
+    //hLayout->addWidget(adjustLabel);
+    hLayout->addWidget(invInputButton);
+    hLayout->addWidget(invOutputButton);
+    hLayout->addStretch();
+
 
     invTableView = new QTableView(this);
     invTableView->setModel(inventoryModel);
     invTableView->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    invTableView->sortByColumn(12, Qt::AscendingOrder);
     QVBoxLayout *vLayout = new QVBoxLayout();
+    vLayout->addLayout(hLayout);
     vLayout->addWidget(invTableView);
+
+    invInputAddButton = new QPushButton("Add");
+    invInputDeleteButton = new QPushButton("Delete");
+    invInputSubmitButton = new QPushButton("Submit");
+    invInputDeleteAllButton = new QPushButton("Delete All");
+    invOutputAddButton = new QPushButton("Add");
+    invOutputDeleteButton = new QPushButton("Delete");
+    invOutputSubmitButton = new QPushButton("Submit");
+    invOutputDeleteAllButton = new QPushButton("Delete All");
+
+    invInputAdjustView = new QTableView(this);
+    invInputAdjustView->setModel(ioModel);
+    invInputAdjustView->setEditTriggers(QAbstractItemView::DoubleClicked);
+    invOutputAdjustView = new QTableView(this);
+    invOutputAdjustView->setModel(ioModel);
+    invOutputAdjustView->setEditTriggers(QAbstractItemView::DoubleClicked);
+    adjustIOFilter();
+    invInputAdjustView->setColumnHidden(0, true);
+    //invInputAdjustView->setColumnHidden(15, true);
+    invOutputAdjustView->setColumnHidden(0, true);
+    //invOutputAdjustView->setColumnHidden(15, true);
+    invInputLabel = new QLabel("Input Adjustment Table");
+    invOutputLabel = new QLabel("Output Adjustment Table");
+    QHBoxLayout *invInputLine = new QHBoxLayout();
+    invInputLine->addWidget(invInputLabel);
+    invInputLine->addStretch();
+    invInputLine->addWidget(invInputAddButton);
+    invInputLine->addWidget(invInputDeleteButton);
+    QHBoxLayout *invOutputLine = new QHBoxLayout();
+    invOutputLine->addWidget(invOutputLabel);
+    invOutputLine->addStretch();
+    invOutputLine->addWidget(invOutputAddButton);
+    invOutputLine->addWidget(invOutputDeleteButton);
+    QHBoxLayout *invInputLine_2 = new QHBoxLayout();
+    invInputLine_2->addStretch();
+    invInputLine_2->addWidget(invInputDeleteAllButton);
+    invInputLine_2->addWidget(invInputSubmitButton);
+    QHBoxLayout *invOutputLine_2 = new QHBoxLayout();
+    invOutputLine_2->addStretch();
+    invOutputLine_2->addWidget(invOutputDeleteAllButton);
+    invOutputLine_2->addWidget(invOutputSubmitButton);
+    invInputAddButton->hide();
+    invInputDeleteButton->hide();
+    invOutputAddButton->hide();
+    invOutputDeleteButton->hide();
+    invInputLabel->hide();
+    invOutputLabel->hide();
+    invOutputSubmitButton->hide();
+    invInputSubmitButton->hide();
+    invOutputDeleteAllButton->hide();
+    invInputDeleteAllButton->hide();
+
+    QVBoxLayout *tableInLayout = new QVBoxLayout();
+    tableInLayout->addLayout(invInputLine);
+    tableInLayout->addWidget(invInputAdjustView);
+    tableInLayout->addLayout(invInputLine_2);
+    QVBoxLayout *tableOutLayout = new QVBoxLayout();
+    tableOutLayout->addLayout(invOutputLine);
+    tableOutLayout->addWidget(invOutputAdjustView);
+    tableOutLayout->addLayout(invOutputLine_2);
+    invInputAdjustView->hide();
+
+    QHBoxLayout *tableAdjLayout = new QHBoxLayout();
+    tableAdjLayout->addLayout(tableInLayout);
+    tableAdjLayout->addLayout(tableOutLayout);
+    invOutputAdjustView->hide();
+
+    QFrame* tableAdjFrame = new QFrame();
+    tableAdjFrame->setFrameStyle(QFrame::StyledPanel);
+    tableAdjFrame->setLayout(tableAdjLayout);
+
 
     QFrame *layout = new QFrame();
     layout->setFrameStyle(QFrame::StyledPanel);
@@ -1007,13 +1192,264 @@ QWidget* MainWindow::createInventoryPage(){
     wholeLayout->addLayout(titleLayout);
     wholeLayout->addWidget(layout);
     wholeLayout->addWidget(layout_2);
+    wholeLayout->addWidget(tableAdjFrame);
 
     inventoryPage->setLayout(wholeLayout);
 
     connect(clearButton, &QPushButton::clicked, this, &MainWindow::clearInvFields);
     connect(queryButton, &QPushButton::clicked, this, &MainWindow::searchInvData);
+    connect(invInputButton, &QPushButton::clicked, this, &MainWindow::showInvInput);
+    connect(invOutputButton, &QPushButton::clicked, this, &MainWindow::showInvOutput);
+    connect(invInputAddButton, &QPushButton::clicked, this, &MainWindow::addInvInput);
+    connect(invOutputAddButton, &QPushButton::clicked, this, &MainWindow::addInvOutput);
+    connect(invInputDeleteButton, &QPushButton::clicked, this, &MainWindow::deleteInvInputData);
+    connect(invOutputDeleteButton, &QPushButton::clicked, this, &MainWindow::deleteInvOutputData);
+    connect(invInputSubmitButton, &QPushButton::clicked, this, &MainWindow::submitInvInputData);
+    connect(invOutputSubmitButton, &QPushButton::clicked, this, &MainWindow::submitInvOutputData);
+    connect(invInputDeleteAllButton, &QPushButton::clicked, this, &MainWindow::deleteAllInvInputData);
+    connect(invOutputDeleteAllButton, &QPushButton::clicked, this, &MainWindow::deleteAllInvOutputData);
 
     return inventoryPage;
+}
+
+void MainWindow::deleteAllInvInputData(){
+    currPage = MONINPUT;
+    deleteAllInputData();
+}
+
+void MainWindow::deleteAllInvOutputData(){
+    currPage = MONOUTPUT;
+    deleteAllInputData();
+}
+
+void MainWindow::adjustIOFilter(){
+    ioModel->select();
+    ioModel->setFilter("");
+    /*for(int i = 0; i < ioModel->rowCount(); i++){
+        invOutputAdjustView->setColumnHidden(i, false);
+        invInputAdjustView->setColumnHidden(i, false);
+    }*/
+    for(int i = 0; i < ioModel->rowCount(); i++){
+        QSqlRecord tmpRecord = ioModel->record(i);
+        qDebug() << "curr row value of io_type: " << tmpRecord.value("io_type").toString();
+        if(tmpRecord.value("io_type").toString() == MONINPUT){
+            invOutputAdjustView->hideRow(i);
+            invInputAdjustView->setRowHidden(i, false);
+        }
+        else if(tmpRecord.value("io_type").toString() == MONOUTPUT){
+            invInputAdjustView->hideRow(i);
+            invOutputAdjustView->setRowHidden(i, false);
+        }
+        else{
+            invOutputAdjustView->hideRow(i);
+            invInputAdjustView->hideRow(i);
+        }
+    }
+}
+
+void MainWindow::hideInvInput(){
+    invInputLabel->close();
+    invInputAdjustView->close();
+    invInputAddButton->close();
+    invInputDeleteButton->close();
+    invInputSubmitButton->close();
+    invInputDeleteAllButton->close();
+    inputAdjShown = false;
+}
+
+void MainWindow::hideInvOutput(){
+    invOutputLabel->close();
+    invOutputAdjustView->close();
+    invOutputAddButton->close();
+    invOutputDeleteButton->close();
+    invOutputSubmitButton->close();
+    invOutputDeleteAllButton->close();
+    outputAdjShown = false;
+}
+
+void MainWindow::showInvInput(){
+    if(inputAdjShown){
+        qDebug() << "invInputAdjustView was activated";
+        hideInvInput();
+        return;
+    }
+    invInputLabel->show();
+    invInputAdjustView->show();
+    invInputAddButton->show();
+    invInputDeleteButton->show();
+    invInputSubmitButton->show();
+    invInputDeleteAllButton->show();
+    inputAdjShown = true;
+}
+
+void MainWindow::showInvOutput(){
+    if(outputAdjShown){
+        qDebug() << "invOutputAdjustView was activated";
+        hideInvOutput();
+        return;
+    }
+    invOutputLabel->show();
+    invOutputAdjustView->show();
+    invOutputAddButton->show();
+    invOutputDeleteButton->show();
+    invOutputSubmitButton->show();
+    invOutputDeleteAllButton->show();
+    outputAdjShown = true;
+}
+
+void MainWindow::addInvInput(){
+    currPage = MONINPUT;
+    invInputDialog = new adjustInvInput(skuModel, mysql, this);
+    invInputDialog->show();
+    connect(invInputDialog->addButton, &QPushButton::clicked, this, &MainWindow::insertInvAdjustData);
+    connect(invInputDialog->cancelButton, &QPushButton::clicked, this, &MainWindow::hideInvAdjustWindow);
+}
+
+void MainWindow::addInvOutput(){
+    currPage = MONOUTPUT;
+    invInputDialog = new adjustInvInput(skuModel, mysql, this);
+    invInputDialog->show();
+    connect(invInputDialog->addButton, &QPushButton::clicked, this, &MainWindow::insertInvAdjustData);
+    connect(invInputDialog->cancelButton, &QPushButton::clicked, this, &MainWindow::hideInvAdjustWindow);
+}
+
+void MainWindow::insertInvAdjustData(){
+    int skuId = 0;
+    QString nameCN = invInputDialog->nameCNEdit->text();
+    QString nameEN = invInputDialog->nameENEdit->text();
+    QString aliasCN = invInputDialog->aliasCNEdit->text();
+    QString aliasEN = invInputDialog->aliasENEdit->text();
+    QString dose = invInputDialog->doseEdit->currentText();
+    QString pres = invInputDialog->presEdit->currentText();
+    QString specUnit = invInputDialog->specUnitEdit->currentText();
+    float specQuant = invInputDialog->specQuantEdit->text().toFloat();
+    QString package = invInputDialog->packageEdit->currentText();
+    QString manufCN = invInputDialog->manufCNEdit->text();
+    QString manufEN = invInputDialog->manufENEdit->text();
+    QString origin = invInputDialog->originEdit->text();
+    int quantity = invInputDialog->quantityEdit->text().toInt();
+    float price = invInputDialog->priceEdit->text().toFloat();
+
+    if(quantity <= 0){
+        QString warningStr = QString("Invalid Quantity Input");
+        //results in negative storage, generate warning box
+        int ok = QMessageBox::warning(this, "", warningStr, QMessageBox::Ok);
+        if(ok == QMessageBox::Ok)
+            return;
+    }
+
+    //search in SKU table, name + manufacturer
+    QString querySKUStr = QString("select sku_id from SKU where name_cn = '%1' and manufacturer_cn = '%2'").arg(nameCN).arg(manufCN);
+    QSqlQuery *query = new QSqlQuery(mysql->myDB);
+    if(!query->exec(querySKUStr)){
+        qDebug() << "query sku failed";
+        return;}
+    if(query->next()){
+        //sku exist
+        skuId = query->value(0).toInt();
+    }
+    else{
+        //sku does not exist, insert one new record into SKU
+        QSqlRecord skuRecord = skuModel->record();
+        skuRecord.setValue(1, nameCN);
+        skuRecord.setValue(2, nameEN);
+        skuRecord.setValue(3, aliasCN);
+        skuRecord.setValue(4, aliasEN);
+        skuRecord.setValue(5, dose);
+        skuRecord.setValue(6, pres);
+        skuRecord.setValue(7, specUnit);
+        skuRecord.setValue(8, specQuant);
+        skuRecord.setValue(9, package);
+        skuRecord.setValue(10, manufCN);
+        skuRecord.setValue(11, manufEN);
+        skuRecord.setValue(12, origin);
+        skuModel->insertRecord(skuModel->rowCount(), skuRecord);
+        skuModel->submitAll();
+        QString tmpFilter = QString("name_cn = '%1' and manufacturer_cn = '%2'").arg(nameCN).arg(manufCN);
+
+        skuModel->setFilter(tmpFilter);
+        skuModel->select();
+        skuId = skuModel->record(0).value(0).toInt();
+    }
+
+    if(currPage == MONOUTPUT){
+        QString queryInvStr = QString("select quantity from inventory where sku_id = %1").arg(skuId);
+        if(!query->exec(queryInvStr)){
+            qDebug() << "query inventory failed: " << query->lastError().text();
+        }
+        if(query->next()){
+            int invQuant = query->value(0).toInt();
+            QString warningStr = QString("Current Inventory Count: %1\n"
+                                         "Attempt to Remove Count: %2\n"
+                                         "Would you like to remove %1 instead?"
+                                         ).arg(invQuant).arg(quantity);
+            //results in negative storage, generate warning box
+            if(invQuant < quantity){
+                int ok = QMessageBox::warning(this, "Negative Inventory Warning", warningStr, QMessageBox::No, QMessageBox::Yes);
+                if(ok == QMessageBox::No)
+                    return;
+                else{
+                    quantity = invQuant;
+                }
+            }
+        }
+        else{
+            qDebug() << "query inventory next failed: " << query->lastError().text();
+        }
+    }
+
+
+    QSqlRecord io_record = ioModel->record();
+    io_record.setValue(0, skuId);
+    io_record.setValue(1, nameCN);
+    io_record.setValue(2, nameEN);
+    io_record.setValue(3, aliasCN);
+    io_record.setValue(4, aliasEN);
+    io_record.setValue(5, dose);
+    io_record.setValue(6, pres);
+    io_record.setValue(7, specUnit);
+    io_record.setValue(8, specQuant);
+    io_record.setValue(9, package);
+    io_record.setValue(10, manufCN);
+    io_record.setValue(11, manufEN);
+    io_record.setValue(12, origin);
+    io_record.setValue(13, quantity);
+    io_record.setValue(14, price);
+    io_record.setValue(15, currPage);
+    ioModel->insertRecord(ioModel->rowCount(), io_record);
+    ioModel->submitAll();
+    ioModel->select();
+    invInputDialog->close();
+
+    adjustIOFilter();
+}
+
+void MainWindow::hideInvAdjustWindow(){
+    invInputDialog->close();
+}
+
+void MainWindow::submitInvInputData(){
+    currPage = MONINPUT;
+    submitData();
+    adjustIOFilter();
+}
+
+void MainWindow::submitInvOutputData(){
+    currPage = MONOUTPUT;
+    submitData();
+    adjustIOFilter();
+}
+
+void MainWindow::deleteInvInputData(){
+    int curRow = invInputAdjustView->currentIndex().row();
+    ioModel->removeRow(curRow);
+    ioModel->submitAll();
+}
+
+void MainWindow::deleteInvOutputData(){
+    int curRow = invOutputAdjustView->currentIndex().row();
+    ioModel->removeRow(curRow);
+    ioModel->submitAll();
 }
 
 void MainWindow::createTmpInventoryTable(){
@@ -1032,24 +1468,108 @@ void MainWindow::createTmpInventoryTable(){
 }
 
 void MainWindow::clearInvFields(){
-    nameCNEditInv->clear();
+    /*nameCNEditInv->clear();
     nameENEditInv->clear();
     aliasCNEditInv->clear();
     aliasENEditInv->clear();
+*/
+    nameEditInv->clear();
     doseEditInv->setCurrentIndex(0);
     presEditInv->setCurrentIndex(0);
-    specUnitEditInv->setCurrentIndex(0);
-    specQuantEditInv->clear();
+    //specUnitEditInv->setCurrentIndex(0);
+    //specQuantEditInv->clear();
     packageEditInv->clear();
-    manufCNEditInv->clear();
+   /* manufCNEditInv->clear();
     manufENEditInv->clear();
     originEditInv->clear();
     quantityEditInv->clear();
-    priceEditInv->clear();
+    priceEditInv->clear();*/
+    manufEditInv->setCurrentIndex(0);
+    quantityEditInvLow->clear();
+    quantityEditInvHigh->clear();
+    priceEditInvLow->clear();
+    priceEditInvHigh->clear();
 }
 
 void MainWindow::searchInvData(){
-    QString nameCN = QString("name_cn = '%1'").arg(nameCNEditInv->text());
+    QString nameStr = QString("name_cn = '%1'").arg(nameEditInv->text());
+    QString doseStr = QString("dose_type = '%1'").arg(doseEditInv->currentText());
+    QString presStr = QString("prescription = '%1'").arg(presEditInv->currentText());
+    QString packageStr = QString("package = '%1'").arg(packageEditInv->currentText());
+    QString manufStr = QString("manufucturer_cn = '%1'").arg(manufEditInv->currentText());
+    QString priceStr = QString("price between '%1' and '%2'").arg(priceEditInvLow->text()).arg(priceEditInvHigh->text());
+    QString quantityStr = QString("quantity between '%1' and '%2'").arg(quantityEditInvLow->text()).arg(quantityEditInvHigh->text());
+    QString filterStr = "";
+    if(nameCheckBox->isChecked()){
+        if(!nameEditInv->text().isEmpty())
+            filterStr.append(nameStr);
+    }
+    if(doseCheckBox->isChecked()){
+        if(!doseEditInv->currentText().isEmpty()){
+            if(!filterStr.isEmpty())
+                filterStr.append(" and ");
+            filterStr.append(doseStr);
+        }
+    }
+    if(presCheckBox->isChecked()){
+        if(!presEditInv->currentText().isEmpty()){
+            if(!filterStr.isEmpty())
+                filterStr.append(" and ");
+            filterStr.append(presStr);
+        }
+    }
+    if(packageCheckBox->isChecked()){
+        if(!packageEditInv->currentText().isEmpty()){
+            if(!filterStr.isEmpty())
+                filterStr.append(" and ");
+            filterStr.append(packageStr);
+        }
+    }
+    if(manufCheckBox->isChecked()){
+        if(!manufEditInv->currentText().isEmpty()){
+            if(!filterStr.isEmpty())
+                filterStr.append(" and ");
+            filterStr.append(manufStr);
+        }
+    }
+    if(priceCheckBox->isChecked()){
+        if(!priceEditInvLow->text().isEmpty() && !priceEditInvHigh->text().isEmpty()){
+            if(!filterStr.isEmpty())
+                filterStr.append(" and ");
+            filterStr.append(priceStr);
+        }
+        else if(!priceEditInvLow->text().isEmpty()){
+            if(!filterStr.isEmpty())
+                filterStr.append(" and ");
+            filterStr.append(QString("price = '%1'").arg(priceEditInvLow->text()));
+        }
+        else if(!priceEditInvHigh->text().isEmpty()){
+            if(!filterStr.isEmpty())
+                filterStr.append(" and ");
+            filterStr.append(QString("price = '%1'").arg(priceEditInvHigh->text()));
+        }
+    }
+    if(quantityCheckBox->isChecked()){
+        if(!quantityEditInvLow->text().isEmpty() && !quantityEditInvHigh->text().isEmpty()){
+            if(!filterStr.isEmpty())
+                filterStr.append(" and ");
+            filterStr.append(quantityStr);
+        }
+        else if(!quantityEditInvLow->text().isEmpty()){
+            if(!filterStr.isEmpty())
+                filterStr.append(" and ");
+            filterStr.append(QString("quantity = '%1'").arg(quantityEditInvLow->text()));
+        }
+        else if(!quantityEditInvHigh->text().isEmpty()){
+            if(!filterStr.isEmpty())
+                filterStr.append(" and ");
+            filterStr.append(QString("quantity = '%1'").arg(quantityEditInvHigh->text()));
+        }
+    }
+    inventoryModel->setFilter("");
+    inventoryModel->setFilter(filterStr);
+    inventoryModel->select();
+    /*QString nameCN = QString("name_cn = '%1'").arg(nameCNEditInv->text());
     QString nameEN = QString("name_en = '%1'").arg(nameENEditInv->text());
     QString aliasCN = QString("alias_cn = '%1'").arg(aliasCNEditInv->text());
     QString aliasEN = QString("alias_en = '%1'").arg(aliasENEditInv->text());
@@ -1134,7 +1654,7 @@ void MainWindow::searchInvData(){
     inventoryModel->setFilter("");
     inventoryModel->setFilter(filterStr);
     inventoryModel->select();
-
+*/
 }
 
 QWidget* MainWindow::createReceiptPage(){
@@ -1149,17 +1669,17 @@ QWidget* MainWindow::createReceiptPage(){
     dateSelection = new QComboBox();
     QStringList dateList;
     dateList << "";
-    QString dateStr = QString("select receipt_date from receipt");
+    QString dateStr = QString("select distinct receipt_date from receipt order by receipt_id desc");
     QSqlQuery *query = new QSqlQuery(mysql->myDB);
     if(!query->exec(dateStr)){
         qDebug() << "fail to select receipt_date from receipt: " << query->lastError().text();
     }
-    QString tmpDateStr = "";
+    //QString tmpDateStr = "";
     while(query->next()){
-        if(query->value(0).toString() != tmpDateStr){
+        //if(query->value(0).toString() != tmpDateStr){
             dateList << query->value(0).toString();
-            tmpDateStr = query->value(0).toString();
-        }
+            //tmpDateStr = query->value(0).toString();
+       // }
     }
     dateSelection->addItems(dateList);
 
@@ -1170,10 +1690,14 @@ QWidget* MainWindow::createReceiptPage(){
     typeList << "" << INPUT << OUTPUT << MONINPUT << MONOUTPUT;
     typeSelection->addItems(typeList);
 
+    QLabel *nameLabel = new QLabel("Name");
+    nameEditReceipt = new QLineEdit();
+
     QPushButton *queryButton = new QPushButton("Search");
     QPushButton *clearButton = new QPushButton("Clear");
     QPushButton *resetButton = new QPushButton("Reset");
 
+    /*
     QLabel *nameCNLabel = new QLabel("Name (CN)*");
     nameCNEditReceipt = new QLineEdit;
     QLabel *nameENLabel = new QLabel("Name (EN)*");
@@ -1251,16 +1775,35 @@ QWidget* MainWindow::createReceiptPage(){
     gridLayout->addWidget(clearButton, 4, 7);
     gridLayout->addWidget(resetButton, 4, 6);
 
-    QGridLayout *gridLayout_2 = new QGridLayout();
+    */
+
+    /*QGridLayout *gridLayout_2 = new QGridLayout();
     gridLayout_2->addWidget(dateLabel, 0, 0);
     gridLayout_2->addWidget(dateSelection, 0, 1);
-    gridLayout_2->addWidget(typeLabel, 0, 2);
-    gridLayout_2->addWidget(typeSelection, 0, 3);
-    QLabel *nullLabel = new QLabel("    ");
-    gridLayout_2->addWidget(nullLabel, 0, 4);
-    gridLayout_2->addWidget(nullLabel, 0, 5);
-    gridLayout_2->addWidget(nullLabel, 0, 6);
-    gridLayout_2->addWidget(nullLabel, 0, 7);
+    gridLayout_2->addWidget(typeLabel, 1, 0);
+    gridLayout_2->addWidget(typeSelection, 1, 1);
+    gridLayout_2->addWidget(nameLabel, 2, 0);
+    gridLayout_2->addWidget(nameEditReceipt, 2, 1);
+    gridLayout_2->addWidget(queryButton, 2, 2);*/
+    QVBoxLayout *fieldsLayout = new QVBoxLayout;
+    QHBoxLayout *dateFields = new QHBoxLayout;
+    dateFields->addWidget(dateLabel);
+    dateFields->addWidget(dateSelection);
+    dateFields->addStretch();
+    QHBoxLayout *typeFields = new QHBoxLayout;
+    typeFields->addWidget(typeLabel);
+    typeFields->addWidget(typeSelection);
+    typeFields->addStretch();
+    QHBoxLayout *nameFields = new QHBoxLayout;
+    nameFields->addWidget(nameLabel);
+    nameFields->addWidget(nameEditReceipt);
+    nameFields->addStretch();
+    nameFields->addWidget(queryButton);
+    fieldsLayout->addLayout(dateFields);
+    fieldsLayout->addLayout(typeFields);
+    fieldsLayout->addLayout(nameFields);
+    QFrame *fieldsFrame = new QFrame;
+    fieldsFrame->setLayout(fieldsLayout);
 
     createTmpReceiptTable();
     receiptTableView = new QTableView(this);
@@ -1283,20 +1826,30 @@ QWidget* MainWindow::createReceiptPage(){
     hLayout_2->addWidget(currReceiptPageDisplay);
     hLayout_2->addStretch();
     hLayout_2->addWidget(nextPageButton);
+    QHBoxLayout *hLayout_3 = new QHBoxLayout;
+    hLayout_3->addStretch();
+    hLayout_3->addWidget(resetButton);
 
     QVBoxLayout *vLayout_1 = new QVBoxLayout;
-    vLayout_1->addLayout(gridLayout_2);
-    vLayout_1->addLayout(gridLayout);
+    vLayout_1->addLayout(hLayout_3);
     vLayout_1->addWidget(receiptTableView);
     vLayout_1->addLayout(hLayout_2);
-    QFrame *frame = new QFrame();
-    frame->setFrameStyle(QFrame::StyledPanel);
-    frame->setLayout(vLayout_1);
+    QFrame *tableFrame = new QFrame;
+    tableFrame->setFrameStyle(QFrame::StyledPanel);
+    tableFrame->setLayout(vLayout_1);
 
     QVBoxLayout *vLayout_2 = new QVBoxLayout;
-    vLayout_2->addLayout(titleLayout);
-    vLayout_2->addWidget(frame);
-    receipt->setLayout(vLayout_2);
+    vLayout_2->addWidget(fieldsFrame);
+    vLayout_2->addWidget(tableFrame);
+    QFrame *frame = new QFrame();
+    frame->setFrameStyle(QFrame::StyledPanel);
+    frame->setLayout(vLayout_2);
+
+    QVBoxLayout *pageLayout = new QVBoxLayout;
+    pageLayout->addLayout(titleLayout);
+    pageLayout->addWidget(frame);
+
+    receipt->setLayout(pageLayout);
 
     connect(nextPageButton, &QPushButton::clicked, this, &MainWindow::nextReceiptPage);
     connect(prevPageButton, &QPushButton::clicked, this, &MainWindow::prevReceiptPage);
@@ -1308,7 +1861,7 @@ QWidget* MainWindow::createReceiptPage(){
 }
 
 void MainWindow::resetReceiptView(){
-    QString dateStr = QString("select receipt_date from receipt");
+    QString dateStr = QString("select receipt_date from receipt order by receipt_id desc");
     QSqlQuery *query = new QSqlQuery(mysql->myDB);
     if(!query->exec(dateStr)){
         qDebug() << "fail to select receipt_date from receipt: " << query->lastError().text();
@@ -1318,6 +1871,8 @@ void MainWindow::resetReceiptView(){
         receiptModel->setFilter(QString("receipt_date = '%1'").arg(query->value(0).toString()));
     }
     receiptModel->select();
+    currReceiptPage = 1;
+    currReceiptPageDisplay->setText(QString("%1 | %2").arg(currReceiptPage).arg(totalReceiptPage));
 }
 
 void MainWindow::createTmpReceiptTable(){
@@ -1340,7 +1895,8 @@ void MainWindow::createTmpReceiptTable(){
 void MainWindow::searchReceiptData(){
     QString dateString = QString("receipt_date = '%1'").arg(dateSelection->currentText());
     QString typeString = QString("io_type = '%1'").arg(typeSelection->currentText());
-    QString nameCN = QString("name_cn = '%1'").arg(nameCNEditReceipt->text());
+    QString nameStr = QString("name_cn = '%1' or name_en = '%1' or alias_cn = '%1' or alias_en = '%1'").arg(nameEditReceipt->text());
+    /*QString nameCN = QString("name_cn = '%1'").arg(nameCNEditReceipt->text());
     QString nameEN = QString("name_en = '%1'").arg(nameENEditReceipt->text());
     QString aliasCN = QString("alias_cn = '%1'").arg(aliasCNEditReceipt->text());
     QString aliasEN = QString("alias_en = '%1'").arg(aliasENEditReceipt->text());
@@ -1353,7 +1909,7 @@ void MainWindow::searchReceiptData(){
     QString manufEN = QString("manufucturer_en = '%1'").arg(manufENEditReceipt->text());
     QString origin = QString("product_of_origin = '%1'").arg(originEditReceipt->text());
     QString quantity = QString("quantity = '%1'").arg(quantityEditReceipt->text());
-    QString price = QString("price = '%1'").arg(priceEditReceipt->text());
+    QString price = QString("price = '%1'").arg(priceEditReceipt->text());*/
     QString filterStr = "";
     if(!dateSelection->currentText().isEmpty()){
         filterStr.append(dateString);
@@ -1364,6 +1920,12 @@ void MainWindow::searchReceiptData(){
             filterStr.append(" and ");
         filterStr.append(typeString);
     }
+    if(!nameEditReceipt->text().isEmpty()){
+        if(!filterStr.isEmpty())
+            filterStr.append(" and ");
+        filterStr.append(nameStr);
+    }
+    /*
     if(!nameCNEditReceipt->text().isEmpty()){
         if(!filterStr.isEmpty())
             filterStr.append(" and ");
@@ -1434,7 +1996,7 @@ void MainWindow::searchReceiptData(){
             filterStr.append(" and ");
         filterStr.append(price);
     }
-
+*/
     if(!dateSelection->currentText().isEmpty()){
         currReceiptPage = dateSelection->currentIndex();
         currReceiptPageDisplay->setText(QString("%1 | %2").arg(currReceiptPage).arg(totalReceiptPage));
@@ -1444,12 +2006,12 @@ void MainWindow::searchReceiptData(){
     receiptModel->select();
 }
 
-void MainWindow::nextReceiptPage(){
-    qDebug() << "\n nextReceiptPage...";
-    if(currReceiptPage == totalReceiptPage)
+void MainWindow::prevReceiptPage(){
+    qDebug() << "\n prevReceiptPage...";
+    if(currReceiptPage == 1)
         return;
 
-    QString dateStr = QString("select receipt_date from receipt");
+    QString dateStr = QString("select distinct receipt_date from receipt");
     QSqlQuery *query = new QSqlQuery(mysql->myDB);
     if(!query->exec(dateStr)){
         qDebug() << "fail to select receipt_date from receipt: " << query->lastError().text();
@@ -1457,9 +2019,9 @@ void MainWindow::nextReceiptPage(){
     query->next();
     QString tmpStr = query->value(0).toString();
     while(query->next()){
-        if(tmpStr == currReceiptDate && tmpStr != query->value(0).toString()){
+        if(tmpStr == currReceiptDate){ //&& tmpStr != query->value(0).toString()){
             currReceiptDate = query->value(0).toString();
-            currReceiptPage++;
+            currReceiptPage--;
             break;
         }
         tmpStr = query->value(0).toString();
@@ -1479,12 +2041,13 @@ void MainWindow::nextReceiptPage(){
 
 }
 
-void MainWindow::prevReceiptPage(){
-    qDebug() << "\n prevReceiptPage...";
-    if(currReceiptPage == 1)
+void MainWindow::nextReceiptPage(){
+
+    qDebug() << "\n nextReceiptPage...";
+    if(currReceiptPage == totalReceiptPage)
         return;
 
-    QString dateStr = QString("select receipt_date from receipt");
+    QString dateStr = QString("select distinct receipt_date from receipt");
     QSqlQuery *query = new QSqlQuery(mysql->myDB);
     if(!query->exec(dateStr)){
         qDebug() << "fail to select receipt_date from receipt: " << query->lastError().text();
@@ -1494,7 +2057,7 @@ void MainWindow::prevReceiptPage(){
     while(query->next()){
         if(query->value(0).toString() == currReceiptDate){
             currReceiptDate = tmpStr;
-            currReceiptPage--;
+            currReceiptPage++;
             break;
         }
         tmpStr = query->value(0).toString();
@@ -1514,23 +2077,29 @@ void MainWindow::prevReceiptPage(){
 }
 
 void MainWindow::calcTotalReceiptPage(){
-    QString dateStr = QString("select receipt_date from receipt");
+    QString dateStr = QString("select count(distinct receipt_date) from receipt");
     QSqlQuery *query = new QSqlQuery(mysql->myDB);
     if(!query->exec(dateStr)){
         qDebug() << "fail to select receipt_date from receipt: " << query->lastError().text();
     }
-    totalReceiptPage = 0;
-    QString tmpDateStr = "";
-    while(query->next()){
+    if(!query->next()){
+        qDebug() << query->lastError().text();
+    }
+    else{
+        totalReceiptPage = query->value(0).toInt();
+    }
+   /*  totalReceiptPage = 0;
+   QString tmpDateStr = "";
+   while(query->next()){
         if(query->value(0).toString() != tmpDateStr){
             totalReceiptPage++;
             tmpDateStr = query->value(0).toString();
         }
-    }
+    }*/
 }
 
 void MainWindow::clearReceiptData(){
-    nameCNEditReceipt->clear();
+   /* nameCNEditReceipt->clear();
     nameENEditReceipt->clear();
     aliasCNEditReceipt->clear();
     aliasENEditReceipt->clear();
@@ -1543,13 +2112,8 @@ void MainWindow::clearReceiptData(){
     manufENEditReceipt->clear();
     originEditReceipt->clear();
     quantityEditReceipt->clear();
-    priceEditReceipt->clear();
+    priceEditReceipt->clear();*/
+    nameEditReceipt->clear();
     dateSelection->setCurrentIndex(0);
     typeSelection->setCurrentIndex(0);
 }
-/* Different date on different page
- *  implement a filter function that filters different dates
- *  next button connects to the filter function, changing the dates
- *  change currPageDisplay text
- *  change date drop down combobox
-*/
